@@ -1,0 +1,13 @@
+{
+
+    // ==========================================
+    // AJUSTES GENERALES DEL ESPACIO DE TRABAJO (VS CODE)
+    // ==========================================
+
+    // Dibuja la línea de guía vertical en la columna 80
+    
+    
+    "editor.wordWrap": "wordWrapColumn",
+    "editor.wordWrapColumn": 80,
+    "editor.rulers": [80]
+}
