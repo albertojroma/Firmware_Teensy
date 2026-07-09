@@ -1,64 +1,55 @@
 /**
  * @file main.cpp
- * @brief Punto de entrada del firmware Teensy 4.1 para adquisición del radar US-D1.
- *
- * Esta versión inicial valida el parser UART del radar (RadarUART) de forma
- * aislada, mostrando por USB-Serial las tramas válidas recibidas y usando
- * el LED integrado como indicador visual de actividad.
- *
- * @note Esta es una etapa de validación temprana. La lógica definitiva de
- * adquisición se integrará dentro de la FSM principal (fsm.cpp).
+ * @brief Firmware de adquisición radar tolerante a latencias (TFM).
  */
-
 #include <Arduino.h>
 #include "radar_uart.h"
+#include "radar_buffer.h"
+#include "radar_logger.h"
 
-/** @brief Pin del LED integrado en la Teensy 4.1, usado como indicador visual. */
-const int LED_PIN = 13;
+const int LED_ACTIVIDAD_PIN = 13;
+const int LED_ERROR_SD_PIN = 2;
 
-/** @brief Instancia global del parser UART del radar US-D1. */
-RadarUART radar;
+static uint32_t s_ultimoFlushMs = 0;
 
-/**
- * @brief Inicialización del firmware.
- *
- * Configura el pin del LED como salida, inicializa el puerto USB-Serial
- * para depuración en banco, e inicializa la UART hardware (Serial1)
- * dedicada a la recepción de tramas del radar US-D1.
- */
 void setup() {
-  pinMode(LED_PIN, OUTPUT);
+    pinMode(LED_ACTIVIDAD_PIN, OUTPUT);
+    pinMode(LED_ERROR_SD_PIN, OUTPUT);
+    digitalWrite(LED_ERROR_SD_PIN, LOW);
 
-  Serial.begin(115200);       // USB, solo para depuración en banco
-  radar.begin(Serial1, 115200); // UART hardware dedicada al radar (US-D1)
+    Serial.begin(115200); 
 
-  // Pequeña espera para poder abrir el monitor serie sin perder los primeros mensajes
-  delay(1000);
-  Serial.println("Firmware Teensy - Validacion parser radar US-D1");
+    RadarBuffer_Init();
+    RadarUART_Init(115200); 
+
+    if (!RadarLogger_Init("vuelo_01.csv")) {
+        Serial.println("[ERROR CRÍTICO] Fallo de SD.");
+        digitalWrite(LED_ERROR_SD_PIN, HIGH); 
+        while (true) { delay(100); } // Bloqueo de seguridad
+    }
+
+    Serial.println("Sistema OK. Adquiriendo datos...");
+    s_ultimoFlushMs = millis();
 }
 
-/**
- * @brief Bucle principal de ejecución.
- *
- * En cada iteración, invoca RadarUART::update() para procesar los bytes
- * disponibles en el buffer UART. Cuando se completa una trama válida,
- * la imprime por USB-Serial y activa brevemente el LED como indicador
- * visual de actividad.
- */
 void loop() {
-  if (radar.update()) {
-    RadarFrame frame = radar.getLastFrame();
+    RadarFrame trama_actual;
 
-    // Parpadeo breve del LED como indicador visual de trama válida recibida
-    digitalWrite(LED_PIN, HIGH);
+    /* 1. Consumimos todas las tramas que el radar haya metido en el buffer */
+    while (RadarBuffer_Pop(trama_actual)) {
+        bool ok = RadarLogger_Guardar(trama_actual);
+        
+        if (!ok) {
+            digitalWrite(LED_ERROR_SD_PIN, HIGH);
+        } else {
+            digitalWrite(LED_ACTIVIDAD_PIN, !digitalRead(LED_ACTIVIDAD_PIN)); // Toggle
+        }
+    }
 
-    Serial.print("Altitud (cm): ");
-    Serial.print(frame.altitud_cm);
-    Serial.print(" | SNR: ");
-    Serial.print(frame.snr);
-    Serial.print(" | t (us): ");
-    Serial.println(frame.timestamp_us);
-
-    digitalWrite(LED_PIN, LOW);
-  }
+    /* 2. Temporizador no bloqueante (1 Hz) para guardado seguro */
+    uint32_t tiempoActual = millis();
+    if (tiempoActual - s_ultimoFlushMs >= 1000) {
+        RadarLogger_Flush(); 
+        s_ultimoFlushMs = tiempoActual;
+    }
 }
