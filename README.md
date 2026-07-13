@@ -7,7 +7,7 @@ lámina de agua en arrozales de la Albufera mediante UAV.
 
 ## Repositorios relacionados
 
-- Emulador HIL (Raspberry Pi 4): [albertojroma/Emulador_RPi4](enlace)
+- Emulador HIL (Raspberry Pi 4): [albertojroma/Emulador_RPi4](https://github.com/albertojroma/Emulador_RPi4)
   — Emula ambos sensores para validar este firmware sin hardware físico.
 
 ## Estructura
