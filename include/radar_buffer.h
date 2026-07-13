@@ -1,23 +1,16 @@
 /**
  * @file radar_buffer.h
- * @brief Memoria FIFO (Ring Buffer) para el desacoplo temporal del radar US-D1.
+ * @brief Memoria FIFO (Ring Buffer) para datos del radar US-D1.
  *
  * @details
- * Por que existe este buffer, en vez de que la interrupcion de
- * recepcion del radar (isrRadar(), en radar_uart.cpp) escriba
- * directamente en la tarjeta SD: la captura de cada byte debe ser lo
- * mas rapida posible, porque ocurre dentro de una interrupcion
- * hardware que no puede demorarse sin arriesgar la perdida de bytes
- * siguientes o interferir con otras interrupciones del sistema (p.
- * ej. la del GPS). Escribir en la tarjeta SD, en cambio, es una
- * operacion lenta y de duracion variable (puede tardar varios
- * milisegundos, mas aun si el propio buffer interno de la libreria SD
- * necesita volcar una pagina fisica de la memoria flash). Este buffer
- * circular actua de "colchon" entre ambos ritmos: la interrupcion
- * solo tiene que copiar 8 bytes (RadarBuffer_Push()) y seguir; el
- * consumo mas lento (registro en SD desde loop(), ver main.cpp) se
- * hace fuera de cualquier contexto de interrupcion, sin presion de
- * tiempo real.
+ * La razon de este buffer es porque la captura de cada byte debe ser lo
+ * mas rapida posible, porque ocurre dentro de una interrupcion hardware que no
+ * puede arriesgar la perdida de bytes o interferir con otras interrupciones
+ * del sistema (p. ej. la del GPS). Escribir en la tarjeta SD, es una operacion
+ * lenta y de duracion variable.
+ * La interrupcion solo tiene que copiar 8 bytes (RadarBuffer_Push()) y seguir;
+ * el consumo mas lento (registro en SD desde loop(), ver main.cpp) se hace
+ * fuera de cualquier contexto de interrupcion, sin presion de tiempo real.
  *
  * @author Alberto Jesus Rodriguez Machado
  * @date 2026
@@ -30,20 +23,19 @@
 
 /**
  * @def BUFFER_SIZE
- * @brief Numero de tramas RadarFrame que caben simultaneamente en el buffer circular.
+ * @brief Numero de tramas RadarFrame que caben simultaneamente en el buffer
+ * circular.
  *
  * @details
  * Se ha elegido una potencia de 2 (256) de forma deliberada: permite
- * calcular el indice siguiente mediante una mascara de bits
- * (BUFFER_MASK) en vez de una operacion de modulo (%). En un
- * microcontrolador, el operador modulo sobre un valor que no es
- * potencia de 2 requiere una division entera (costosa en ciclos de
- * reloj); con una potencia de 2, (x + 1) % BUFFER_SIZE es equivalente
- * a (x + 1) & BUFFER_MASK, una operacion AND de un solo ciclo. Dado
- * que este calculo se ejecuta en cada byte recibido dentro de una
- * interrupcion hardware (a traves de RadarBuffer_Push()), es
- * precisamente el tipo de operacion donde minimizar el coste por
- * ciclo importa.
+ * calcular el indice siguiente mediante una mascara de bits (BUFFER_MASK) en
+ * vez de una operacion de modulo (%) porque esta es una operacion costosa en
+ * recursos (en ciclos de reloj concretamente). Con una potencia de 2, (x + 1)
+ * % BUFFER_SIZE es equivalente a (x + 1) & BUFFER_MASK, una operacion AND de
+ * un solo ciclo.
+ * Como este calculo se ejecuta en cada byte recibido dentro de una
+ * interrupcion hardware (a traves de RadarBuffer_Push()), minimizar el coste
+ * por ciclo importa.
  * @todo justificar por que el tamano concreto es 256 y no otro valor
  * potencia de 2 (p. ej. 128 o 512) -- no se ha documentado un calculo
  * explicito de cuantos segundos de margen a la tasa de 100 Hz del
@@ -76,9 +68,7 @@ void RadarBuffer_Init(void);
  * @brief Inserta una trama en el buffer circular (productor).
  *
  * @details Pensada para invocarse desde la interrupcion de recepcion
- * del radar (isrRadar(), en radar_uart.cpp) -- es, por tanto, la
- * unica funcion de este modulo que se ejecuta en contexto de
- * interrupcion real.
+ * del radar (isrRadar(), en radar_uart.cpp).
  *
  * @param frame Trama a insertar, pasada por referencia constante para
  *        evitar la copia de 8 bytes que supondria pasarla por valor.
@@ -86,7 +76,7 @@ void RadarBuffer_Init(void);
  *         lleno, en cuyo caso la trama se descarta (perdida de trama
  *         por falta de consumo a tiempo desde loop()).
  */
-bool RadarBuffer_Push(const RadarFrame& frame);
+bool RadarBuffer_Push(const RadarFrame &frame);
 
 /**
  * @brief Extrae la trama mas antigua del buffer circular (consumidor).
@@ -100,6 +90,6 @@ bool RadarBuffer_Push(const RadarFrame& frame);
  * @return true si se extrajo una trama; false si el buffer estaba
  *         vacio (no hay tramas nuevas pendientes de procesar).
  */
-bool RadarBuffer_Pop(RadarFrame& frame);
+bool RadarBuffer_Pop(RadarFrame &frame);
 
 #endif // RADAR_BUFFER_H

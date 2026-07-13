@@ -1,17 +1,12 @@
 /**
  * @file radar_logger.h
- * @brief Registro de tramas del radar en un fichero CSV sobre la
- *        tarjeta microSD integrada de la Teensy 4.1, sin bloqueos por
- *        escritura fisica en cada trama.
+ * @brief Registro de tramas del radar en CSV sobre la SD, sin bloqueo
+ *        por escritura fisica en cada trama.
  *
  * @details
- * Este modulo separa deliberadamente dos operaciones que la libreria
- * SD.h combina si se usa de forma ingenua: (a) escribir datos en el
- * bufer de la libreria (rapido, RadarLogger_Guardar()), y (b) forzar
- * la escritura fisica de ese bufer en la memoria flash de la tarjeta
- * (lento, RadarLogger_Flush()). Ver la documentacion de cada funcion
- * en radar_logger.cpp para el razonamiento completo de por que se
- * separan y con que cadencia se invoca el flush.
+ * Separa deliberadamente escribir en el bufer de la libreria SD
+ * (rapido, RadarLogger_Guardar()) de forzar su escritura fisica
+ * (lento, RadarLogger_Flush()) -- ver razonamiento en radar_logger.cpp.
  *
  * @author Alberto Jesus Rodriguez Machado
  * @date 2026
@@ -23,43 +18,30 @@
 #include "radar_uart.h"
 
 /**
- * @brief Inicializa la tarjeta SD y abre (o crea) el fichero CSV indicado.
- *
- * @details Si el fichero no existe, se crea y se escribe la cabecera
- * de columnas (timestamp_us,altitud_cm,snr). Si ya existe, las tramas
- * nuevas se anaden al final sin sobrescribir su contenido previo.
- *
- * @param nombreArchivo Nombre del fichero CSV a crear o abrir.
- * @return true si la SD y el fichero se abrieron/crearon
- *         correctamente; false si la SD no responde o el fichero no
- *         pudo abrirse.
- * @todo el nombre de fichero se pasa como parametro de esta funcion,
- * pero en main.cpp esta codificado como una cadena literal fija
- * ("vuelo_01.csv") -- no se ha documentado un esquema para nombrar
- * ficheros de forma distinta en vuelos sucesivos, lo que podria
- * sobrescribir datos de un vuelo anterior si no se cambia
- * manualmente ese nombre entre sesiones.
+ * @brief Inicializa la SD y crea un fichero CSV nuevo con nombre
+ *        "vuelo_N.csv", donde N es el primer numero disponible que
+ *        no coincide con ningun fichero ya existente en la tarjeta.
+ * @return true si SD y fichero quedaron listos; false si no.
  */
-bool RadarLogger_Init(const char *nombreArchivo);
+bool RadarLogger_Init(void);
 
 /**
- * @brief Anade una fila al CSV con los datos de una trama, sin forzar
- *        su escritura fisica inmediata en la tarjeta.
+ * @brief Anade una fila al CSV, sin forzar su escritura fisica.
+ * @details Registra tanto tramas validas como invalidas -- ver la
+ * nota sobre el campo `valida` en radar_uart.h.
  * @param frame Trama a registrar.
- * @return true si la escritura al bufer se realizo correctamente;
- *         false si el fichero no esta disponible (p. ej. la SD se ha
- *         desconectado).
- * @see RadarLogger_Flush() para forzar la escritura fisica periodica.
+ * @return true si se escribio en el bufer; false si el fichero no esta
+ * disponible.
+ * @see RadarLogger_Flush()
  */
-bool RadarLogger_Guardar(const RadarFrame& frame);
+bool RadarLogger_Guardar(const RadarFrame &frame);
 
 /**
- * @brief Fuerza la escritura fisica inmediata del contenido en bufer a la tarjeta SD.
- * @details Pensada para invocarse periodicamente (no en cada trama)
- * desde loop(), mediante un temporizador no bloqueante -- ver
- * main.cpp y la documentacion de RadarLogger_Guardar() en
- * radar_logger.cpp para el razonamiento completo de esta separacion.
+ * @brief Fuerza la escritura fisica del bufer a la SD.
+ * @return true si la escritura fue correcta; false si se detecto un
+ *         fallo (p. ej. SD retirada), en cuyo caso el fichero queda
+ *         inutilizable para el resto de la sesion.
  */
-void RadarLogger_Flush(void);
+bool RadarLogger_Flush(void);
 
 #endif // RADAR_LOGGER_H
