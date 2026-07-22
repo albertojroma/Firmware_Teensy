@@ -1,13 +1,22 @@
 /**
  * @file radar_logger.cpp
- * @brief Implementacion del registro de tramas del radar en CSV sobre SD.
- * @see radar_logger.h para el proposito general del modulo.
+ * @brief Implementacion del registro combinado (radar + sincronizacion
+ *        GPS) en CSV sobre SD.
+ * @see radar_logger.h para el proposito general del modulo y por que se
+ *      combinaron ambos flujos en un unico fichero.
  */
 #include "radar_logger.h"
 #include <SD.h>
 
-/** @brief Fichero CSV abierto durante toda la sesion de registro. */
+/** @brief Fichero CSV abierto durante toda la sesion de registro (radar + GPS). */
 static File s_archivo;
+
+/**
+ * @brief Numero de sesion ("vuelo") elegido por RadarLogger_Init().
+ * @details -1 mientras no se haya llamado a RadarLogger_Init() con
+ * exito -- ver RadarLogger_ObtenerNumeroVuelo().
+ */
+static int s_numeroVueloActual = -1;
 
 /**
  * @brief Escribe un byte en hexadecimal de 2 digitos (con cero a la izquierda si hace falta).
@@ -29,11 +38,11 @@ bool RadarLogger_Init(void)
   if (!SD.begin(BUILTIN_SDCARD))
     return false;
 
-  char nombreArchivo[20];
+  char nombreArchivo[24];
   int numeroVuelo = 1;
   do
   {
-    snprintf(nombreArchivo, sizeof(nombreArchivo), "vuelo_%d.csv", numeroVuelo);
+    snprintf(nombreArchivo, sizeof(nombreArchivo), "radar_logger_%d.csv", numeroVuelo);
     numeroVuelo++;
   } while (SD.exists(nombreArchivo));
   // Al salir del bucle, nombreArchivo es garantizado nuevo -> siempre
@@ -43,13 +52,20 @@ bool RadarLogger_Init(void)
   if (!s_archivo)
     return false;
 
-  s_archivo.println("timestamp_us,altitud_cm,snr,checksum_recibido,checksum_valido,trama_cruda");
+  // numeroVuelo ya se incremento una vez de mas tras encontrar el hueco
+  // libre en el bucle do/while -> el numero real usado es numeroVuelo-1.
+  s_numeroVueloActual = numeroVuelo - 1;
+
+  s_archivo.println("tipo,timestamp_us,altitud_cm,snr,checksum_recibido,checksum_valido,trama_cruda,rcvTow,week");
   s_archivo.flush();
   return true;
 }
 
 /**
  * @details
+ * Antepone "RADAR," como columna `tipo`, y anade ",," al final de la
+ * fila (columnas rcvTow/week vacias -- no aplican a una fila de radar).
+ *
  * `checksum_recibido` se extrae de `frame.trama_cruda[5]` (ultimo byte de la
  * trama cruda).
  * `trama_cruda` se escribe como 6 bytes en hexadecimal separados por espacios
@@ -73,6 +89,7 @@ bool RadarLogger_Guardar(const RadarFrame &frame)
   if (!s_archivo)
     return false;
 
+  s_archivo.print("RADAR,");
   s_archivo.print(frame.timestamp_us);
   s_archivo.print(",");
   s_archivo.print(frame.altitud_cm);
@@ -89,9 +106,33 @@ bool RadarLogger_Guardar(const RadarFrame &frame)
     if (i < 5)
       s_archivo.print(" ");
   }
-  s_archivo.println();
+  s_archivo.println(",,"); // columnas rcvTow,week vacias (no aplican a una fila RADAR)
 
   // AVISO: aqui NO hay flush()! Solo guardamos en cache (ver @details).
+  return true;
+}
+
+/**
+ * @details
+ * Antepone "GPS," como columna `tipo`, deja vacias las 5 columnas
+ * propias del radar (altitud_cm, snr, checksum_recibido, checksum_valido,
+ * trama_cruda), y anade rcvTow/week al final.
+ * Mismo criterio de flush diferido que RadarLogger_Guardar() -- ver
+ * @details de esa funcion para el razonamiento completo, que aplica
+ * igual aqui al compartir el mismo fichero.
+ */
+bool RadarLogger_GuardarSyncGps(const GpsSyncPoint &punto)
+{
+  if (!s_archivo)
+    return false;
+
+  s_archivo.print("GPS,");
+  s_archivo.print(punto.timestamp_us);
+  s_archivo.print(",,,,,,"); // 5 columnas vacias del radar (altitud_cm..trama_cruda)
+  s_archivo.print(punto.rcvTow, 6);
+  s_archivo.print(",");
+  s_archivo.println(punto.week);
+
   return true;
 }
 
@@ -108,4 +149,12 @@ bool RadarLogger_Flush(void)
     return false; // Fallo real detectado al volcar a la SD
   }
   return true;
+}
+
+/**
+ * @copydoc RadarLogger_ObtenerNumeroVuelo
+ */
+int RadarLogger_ObtenerNumeroVuelo(void)
+{
+  return s_numeroVueloActual;
 }

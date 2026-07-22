@@ -68,7 +68,9 @@ static void isrRadar(void)
 {
   IMXRT_LPUART6.STAT = IMXRT_LPUART6.STAT;
 
-  while (IMXRT_LPUART6.STAT & LPUART_STAT_RDRF)
+  // Limite defensivo frente a ruido sostenido en RX1 flotante.
+  uint8_t iteraciones = 0;
+  while (IMXRT_LPUART6.STAT & LPUART_STAT_RDRF && iteraciones < 32)
   {
     // instante del byte actual
     uint32_t last_timestamp_us = micros();
@@ -125,6 +127,7 @@ static void isrRadar(void)
       break;
     }
     }
+    iteraciones++;
   }
 }
 
