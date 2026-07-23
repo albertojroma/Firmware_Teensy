@@ -42,6 +42,7 @@ void RadarBuffer_Init(void)
 {
     s_buffer.head = 0;
     s_buffer.tail = 0;
+    Serial.println("[DEBUG]: Buffer del radar inicializado.");
 }
 
 bool RadarBuffer_Push(const RadarFrame &frame)

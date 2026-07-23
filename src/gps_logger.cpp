@@ -22,6 +22,7 @@ bool GpsLogger_Init(int numeroVuelo)
   if (!s_archivoUbx)
     return false;
 
+  Serial.println("[DEBUG]: Logger del GPS inicializado.");
   return true;
 }
 

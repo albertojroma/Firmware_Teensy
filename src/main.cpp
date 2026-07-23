@@ -6,11 +6,20 @@
  * @details
  * Este fichero integra cinco modulos: captura del radar por interrupcion
  * (radar_uart.h), desacoplo temporal mediante buffer circular
- * (radar_buffer.h), registro del radar en CSV sobre SD con flush
- * diferido (radar_logger.h), captura y configuracion del GPS por
- * interrupcion (gps_uart.h), y registro del GPS sobre SD (gps_logger.h).
- * No implementa logica propia mas alla de la orquestacion de estos
- * modulos y de la senalizacion visual mediante tres LEDs (ver mas abajo).
+ * (radar_buffer.h), registro combinado radar+GPS en CSV sobre SD con
+ * flush diferido (radar_logger.h), captura del GPS por interrupcion
+ * (gps_uart.h), y registro del paso binario del GPS sobre SD
+ * (gps_logger.h). No implementa logica propia mas alla de la
+ * orquestacion de estos modulos y de la senalizacion visual mediante
+ * tres LEDs (ver mas abajo).
+ *
+ * @note El receptor GPS debe estar configurado de antemano de forma
+ * PERMANENTE (RAWX/SFRBX activos, 115200 baudios, guardado en Flash
+ * con u-center) -- este firmware no envia absolutamente nada por
+ * Serial3, solo escucha. Ver gps_uart.h para la justificacion completa
+ * de esta decision de diseno (un cuelgue deterministico, detectado por
+ * biseccion exhaustiva, asociado a la sola presencia de Serial3.write()
+ * en el binario).
  */
 #include <Arduino.h>
 #include "radar_uart.h"
@@ -34,19 +43,18 @@
 const int LED_ACTIVIDAD_PIN = 13;
 
 /**
- * @brief LED dedicado, en un pin conectado a un LED para senyalizar
- * errores relacionados con la SD (radar).
+ * @brief LED dedicado a errores relacionados con la SD del radar.
  */
 const int LED_ERROR_SD_PIN = 2;
 
 /**
- * @brief LED dedicado a errores del modulo GPS (configuracion fallida
- * tras agotar reintentos, o fallo de escritura en sus ficheros).
- * @details Pin fisicamente distinto de LED_ACTIVIDAD_PIN y
- * LED_ERROR_SD_PIN, mismo patron de cableado (resistencia limitadora +
- * LED hacia GND). A diferencia de LED_ERROR_SD_PIN, un fallo de GPS NO
- * detiene el firmware -- ver la decision de diseno documentada en
- * gps_uart.cpp (GPS_ERROR).
+ * @brief LED dedicado a errores de registro en SD del modulo GPS.
+ * @details Unicamente refleja fallos de GpsLogger_Init()/
+ * GpsLogger_Flush() -- ya no existe ningun estado de error de
+ * configuracion del GPS en si, porque gps_uart.h ya no configura nada
+ * (ver su documentacion, y la nota de este mismo fichero). Pin
+ * fisicamente distinto de LED_ACTIVIDAD_PIN y LED_ERROR_SD_PIN, mismo
+ * patron de cableado (resistencia limitadora + LED hacia GND).
  */
 const int LED_ERROR_GPS_PIN = 4;
 
@@ -64,51 +72,47 @@ static uint32_t s_ultimoFlushMs = 0;
  * @details
  * Orden de inicializacion, y por que importa:
  *  1. Se configuran los tres LEDs como salida, con los de error
- *     explicitamente apagados (por si el pin arrancara en un estado no
- *     determinado).
+ *     explicitamente apagados.
  *  2. Se abre el puerto USB-Serial, unicamente para depuracion. En el
  *     sistema final desplegado en campo no habra ningun monitor
  *     conectado a este puerto.
  *  3. Se inicializa el buffer circular del radar ANTES que su
- *     interrupcion `RadarUART_Init()`, por el mismo motivo ya
- *     documentado en versiones anteriores de este fichero: la
- *     interrupcion podria dispararse en cualquier momento y llamar a
- *     `RadarBuffer_Push()`.
- *  4. Se inicializa el registro del radar en SD, con espera activa y
- *     reintentos si la tarjeta no esta insertada (LED de error
- *     encendido durante la espera). Esta SI bloquea el firmware
- *     indefinidamente si falla de forma persistente -- decision ya
- *     tomada: sin monitor serie en campo, es preferible detectar un
- *     fallo de SD en tierra que perder silenciosamente una salida de
- *     campo completa.
+ *     interrupcion `RadarUART_Init()`, porque la interrupcion podria
+ *     dispararse en cualquier momento y llamar a `RadarBuffer_Push()`.
+ *  4. Se inicializa el registro combinado (radar+GPS) en SD, con
+ *     espera activa y reintentos si la tarjeta no esta insertada (LED
+ *     de error encendido durante la espera). Esta SI bloquea el
+ *     firmware indefinidamente si falla de forma persistente --
+ *     decision ya tomada: sin monitor serie en campo, es preferible
+ *     detectar un fallo de SD en tierra que perder silenciosamente una
+ *     salida de campo completa.
  *  5. Se consulta el numero de sesion ya elegido por RadarLogger_Init()
- *     (`RadarLogger_ObtenerNumeroVuelo()`) y se usa para inicializar el
- *     registro del GPS, de forma que ambos conjuntos de ficheros
- *     comparten el mismo numero de vuelo. Si GpsLogger_Init() falla, se
- *     enciende LED_ERROR_GPS_PIN pero NO se bloquea el firmware -- el
- *     radar debe poder seguir registrando sin GPS.
- *  6. Se inicializan las interrupciones del radar y del GPS. El GPS
- *     arranca su propia maquina de estados de configuracion (ver
- *     gps_uart.h), que se completa de forma asincrona en loop().
+ *     y se usa para inicializar el registro del `.ubx` del GPS, de
+ *     forma que ambos ficheros comparten el mismo numero de vuelo. Si
+ *     GpsLogger_Init() falla, se enciende LED_ERROR_GPS_PIN pero NO se
+ *     bloquea el firmware -- el radar debe poder seguir registrando
+ *     sin GPS.
+ *  6. Se inicializan las interrupciones del radar y del GPS.
+ *     GpsUART_Init() no envia nada por Serial3 -- el receptor debe
+ *     estar ya configurado de fabrica/manualmente de antemano (ver
+ *     @note de este fichero).
  */
 void setup()
 {
+  // Para que de tiempo a arrancar el monitor serie
   delay(10000);
+  Serial.println("[DEBUG]: Inicia el sistema");
 
-  // Configuracion de LEDs
   pinMode(LED_ACTIVIDAD_PIN, OUTPUT);
   pinMode(LED_ERROR_SD_PIN, OUTPUT);
   pinMode(LED_ERROR_GPS_PIN, OUTPUT);
   digitalWrite(LED_ERROR_SD_PIN, LOW);
   digitalWrite(LED_ERROR_GPS_PIN, LOW);
 
-  // Configuracion del puerto serie de depuracion
   Serial.begin(PUERTO_SERIE_BAUD_RATE);
 
   RadarBuffer_Init();
 
-  // Espera activa. Si la SD no esta insertada al arrancar, el LED de
-  // error queda encendido y el firmware reintenta periodicamente.
   while (!RadarLogger_Init())
   {
     digitalWrite(LED_ERROR_SD_PIN, HIGH);
@@ -116,23 +120,16 @@ void setup()
     digitalWrite(LED_ERROR_SD_PIN, LOW);
   }
   digitalWrite(LED_ERROR_SD_PIN, LOW);
-  Serial.println("[DEBUG] Logger del radar inicializado");
 
   int numeroVuelo = RadarLogger_ObtenerNumeroVuelo();
-
   if (!GpsLogger_Init(numeroVuelo))
   {
-    // Fallo NO bloqueante: ver justificacion en el @details de esta
-    // funcion y en gps_uart.cpp (GPS_ERROR).
+    // Fallo NO bloqueante: el radar debe poder seguir registrando sin GPS.
     digitalWrite(LED_ERROR_GPS_PIN, HIGH);
   }
-  Serial.println("[DEBUG] Logger del GPS inicializado");
 
   RadarUART_Init();
-  Serial.println("[DEBUG] UART del radar inicializado");
-
   GpsUART_Init();
-  Serial.println("[DEBUG] UART del GPS inicializado");
 
   s_ultimoFlushMs = millis();
 }
@@ -143,16 +140,16 @@ void setup()
  * @details
  * Realiza tres tareas independientes en cada iteracion. Ninguna bloqueante:
  *
- *  1. **Consumo del buffer circular del radar**: igual que en versiones
- *     anteriores de este fichero -- extrae con `RadarBuffer_Pop()` todas
- *     las tramas acumuladas, y las registra con `RadarLogger_Guardar()`.
+ *  1. **Consumo del buffer circular del radar**: extrae con
+ *     `RadarBuffer_Pop()` todas las tramas acumuladas, y las registra
+ *     con `RadarLogger_Guardar()`.
  *
  *  2. **Procesado del GPS**: `GpsUART_Process()` reensambla las tramas
- *     UBX recibidas, avanza su maquina de estados de configuracion, y
- *     registra en SD las tramas validas una vez en estado de registro
+ *     UBX recibidas y las registra en SD una vez detectado flujo valido
  *     -- toda esa logica vive dentro del propio modulo (ver
- *     gps_uart.cpp); loop() solo tiene que invocarla y comprobar
- *     `GpsUART_HayError()` para la senyalizacion visual.
+ *     gps_uart.cpp). Sin ninguna comprobacion de error asociada: ya no
+ *     existe ese concepto, al no haber ninguna configuracion que pueda
+ *     fallar (ver gps_uart.h).
  *
  *  3. **Flush**: cada 1000 ms (comparacion de millis() sin usar
  *     delay()), se invoca `RadarLogger_Flush()` y `GpsLogger_Flush()`
@@ -162,8 +159,6 @@ void setup()
  */
 void loop()
 {
-  Serial.println("[DEBUG] Inicio del loop");
-
   RadarFrame trama_actual;
 
   /* 1. Consumimos todas las tramas que el radar haya metido en el buffer */
@@ -182,12 +177,8 @@ void loop()
     }
   }
 
-  /* 2. Procesado del GPS: reensamblado de tramas + maquina de estados */
+  /* 2. Procesado del GPS: reensamblado de tramas */
   GpsUART_Process();
-  if (GpsUART_HayError())
-  {
-    digitalWrite(LED_ERROR_GPS_PIN, HIGH);
-  }
 
   /* 3. Temporizador no bloqueante (1 Hz) para guardado seguro */
   uint32_t tiempoActual = millis();

@@ -4,13 +4,33 @@
  * H-RTK ZED-F9P Ultralight) por UART, sobre la Teensy 4.1.
  *
  * @details
- * Captura, configura y reensambla las tramas UBX del receptor GPS,
- * dejando los bytes crudos y validados listos para su registro en SD
- * (ver gps_logger.h). La captura ocurre por interrupcion hardware sobre
- * el periferico LPUART2, al que corresponde el puerto logico Serial3
- * de Teensyduino (mapeo verificado, mismo criterio que ya se aplico
- * para el radar en Serial1/LPUART6):
+ * Captura y reensambla las tramas UBX del receptor GPS, dejando los
+ * bytes crudos y validados listos para su registro en SD (ver
+ * gps_logger.h). La captura ocurre por interrupcion hardware sobre el
+ * periferico LPUART2, al que corresponde el puerto logico Serial3 de
+ * Teensyduino (mapeo verificado, mismo criterio que ya se aplico para
+ * el radar en Serial1/LPUART6):
  * https://github.com/MicroControleurMonde/Teensy_4.1/blob/main/Teensy_LPUART.py
+ *
+ * @note CAMBIO DE DISENO: este modulo NO envia absolutamente nada por
+ * Serial3 (ni configuracion, ni consultas) -- solo escucha. Se detecto
+ * empiricamente, mediante una biseccion exhaustiva documentada en el
+ * proyecto, que la sola presencia de una llamada a Serial3.write()
+ * alcanzable en el binario (aunque nunca llegara a ejecutarse)
+ * provocaba un cuelgue deterministico de la libreria SD al escribir en
+ * la tarjeta. La causa raiz exacta no se llego a identificar pese a un
+ * analisis exhaustivo (memoria estatica, direcciones, simbolos,
+ * desensamblado, y una sesion de depuracion con GDB que resulto poco
+ * fiable en este entorno concreto). La solucion adoptada es evitar POR
+ * COMPLETO la escritura por Serial3 desde el firmware: el receptor se
+ * configura una UNICA VEZ, de forma permanente, con u-center conectado
+ * directamente a un PC (Receiver -> Action -> Save Config, que lo
+ * guarda en la capa Flash del propio receptor -- ver ZED-F9P
+ * Integration Manual, UBX-18010802, apartado 3.1: "Configuration
+ * settings can be saved permanently in flash memory"; procedimiento
+ * confirmado en la practica en
+ * https://www.ardusimple.es/how-to-configure-ublox-zed-f9p/, paso 11),
+ * no en cada arranque de la Teensy.
  *
  * @note A diferencia de radar_uart.cpp, aqui la ISR NO reensambla la
  * trama completa: solo captura byte + timestamp en un buffer circular
@@ -56,48 +76,28 @@ typedef struct
 
 /**
  * @brief Inicializa Serial3 (LPUART2) y activa la captura por interrupcion.
- *
- * @details
- * Arranca al baudrate de fabrica del ZED-F9P (38400, ver ZED-F9P
- * Integration Manual UBX-18010802 R16, apartado 3.1.3, p. 13) y entra
- * en el estado inicial de la maquina de estados de configuracion (ver
- * GpsUART_Process()). La conmutacion al baudrate objetivo (230400)
- * ocurre automaticamente, dentro de la propia maquina de estados,
- * despues de confirmar la configuracion con el receptor.
- *
+ * @details Arranca al unico baudrate soportado (115200), coincidiendo
+ * con la configuracion permanente ya guardada en el receptor -- ver el
+ * @note de este fichero. No envia nada por Serial3, solo escucha.
  * @warning Llamar una unica vez, desde setup(), antes de loop().
+ * @warning El receptor GPS debe estar ya configurado de antemano
+ * (RAWX/SFRBX activos, 115200 baudios, guardado permanentemente en
+ * Flash) mediante u-center -- este modulo no lo comprueba ni lo fuerza.
  * @see GpsUART_Process()
  */
 void GpsUART_Init(void);
 
 /**
- * @brief Avanza la maquina de estados de configuracion/registro del GPS
- * y reensambla las tramas UBX recibidas.
- *
+ * @brief Reensambla las tramas UBX recibidas y las entrega a GpsLogger.
  * @details Debe invocarse en cada iteracion de loop() (a diferencia del
  * radar, que no necesita ninguna llamada explicita porque todo ocurre
  * en su ISR). Consume el buffer circular de bytes que llena la
  * interrupcion, reconstruye tramas UBX completas, verifica su checksum,
- * y:
- * - Durante la configuracion inicial: procesa las respuestas
- *   UBX-ACK-ACK/NAK y UBX-CFG-VALGET necesarias para activar
- *   UBX-RXM-RAWX, UBX-RXM-SFRBX y el baudrate objetivo.
- * - Una vez en registro: entrega cada trama UBX-RXM-RAWX/SFRBX valida a
- *   GpsLogger (ver gps_logger.h), y cada UBX-RXM-RAWX ademas aporta un
- *   GpsSyncPoint.
- *
- * @see GpsUART_HayError()
+ * y entrega cada UBX-RXM-RAWX/SFRBX valida a GpsLogger (ver
+ * gps_logger.h); cada UBX-RXM-RAWX ademas aporta un GpsSyncPoint a
+ * RadarLogger_GuardarSyncGps() (ver radar_logger.h). Cualquier otra
+ * trama recibida se ignora en silencio.
  */
 void GpsUART_Process(void);
-
-/**
- * @brief Indica si la maquina de estados ha entrado en el estado de
- * error terminal (configuracion fallida tras agotar los reintentos).
- * @details Pensada para que main.cpp encienda un LED de error dedicado
- * -- ver la nota de diseno en gps_uart.cpp sobre por que este fallo NO
- * bloquea el resto del firmware (a diferencia de un fallo de SD).
- * @return true si el modulo esta en estado de error.
- */
-bool GpsUART_HayError(void);
 
 #endif // GPS_UART_H

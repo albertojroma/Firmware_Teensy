@@ -36,10 +36,13 @@ static void imprimirHexByte(uint8_t valor)
 bool RadarLogger_Init(void)
 {
   if (!SD.begin(BUILTIN_SDCARD))
+  {
+    Serial.println("[ERROR]: Tarjeta SD no insertada");
     return false;
+  }
 
   char nombreArchivo[24];
-  int numeroVuelo = 1;
+  uint8_t numeroVuelo = 1;
   do
   {
     snprintf(nombreArchivo, sizeof(nombreArchivo), "radar_logger_%d.csv", numeroVuelo);
@@ -50,7 +53,10 @@ bool RadarLogger_Init(void)
 
   s_archivo = SD.open(nombreArchivo, FILE_WRITE);
   if (!s_archivo)
+  {
+    Serial.println("[ERROR]: El archivo no se ha podido abrir");
     return false;
+  }
 
   // numeroVuelo ya se incremento una vez de mas tras encontrar el hueco
   // libre en el bucle do/while -> el numero real usado es numeroVuelo-1.
@@ -58,6 +64,8 @@ bool RadarLogger_Init(void)
 
   s_archivo.println("tipo,timestamp_us,altitud_cm,snr,checksum_recibido,checksum_valido,trama_cruda,rcvTow,week");
   s_archivo.flush();
+
+  Serial.println("[DEBUG]: Logger del radar inicializado.");
   return true;
 }
 

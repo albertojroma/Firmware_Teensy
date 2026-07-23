@@ -146,4 +146,6 @@ void RadarUART_Init()
   IMXRT_LPUART6.CTRL |= LPUART_CTRL_RIE; // Receiver Interrupt Enable
 
   s_estado = WAIT_HEADER;
+
+  Serial.println("[DEBUG]: UART del radar inicializada.");
 }
