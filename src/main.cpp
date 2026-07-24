@@ -102,8 +102,6 @@ void setup()
   // Para que de tiempo a arrancar el monitor serie
   delay(10000);
   Serial.println("[DEBUG]: Inicia el sistema");
-  Serial.println("[DEBUG]: Conecte el emulador del GPS para la prueba 3");
-  delay(2000);
 
   pinMode(LED_ACTIVIDAD_PIN, OUTPUT);
   pinMode(LED_ERROR_SD_PIN, OUTPUT);
