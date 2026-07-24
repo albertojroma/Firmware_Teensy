@@ -98,6 +98,6 @@ void GpsUART_Init(void);
  * RadarLogger_GuardarSyncGps() (ver radar_logger.h). Cualquier otra
  * trama recibida se ignora en silencio.
  */
-void GpsUART_Process(void);
+bool GpsUART_Process(void);
 
 #endif // GPS_UART_H

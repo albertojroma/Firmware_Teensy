@@ -50,7 +50,7 @@ typedef struct
   uint32_t timestamp_us;
 } ByteEvent;
 
-DMAMEM static volatile ByteEvent s_bufferBytes[GPS_BUFFER_BYTES_SIZE];
+static volatile ByteEvent s_bufferBytes[GPS_BUFFER_BYTES_SIZE];
 static volatile uint16_t s_idxEscritura = 0;
 static volatile uint16_t s_idxLectura = 0;
 
@@ -69,8 +69,7 @@ static void isrGps(void)
 {
   IMXRT_LPUART2.STAT = IMXRT_LPUART2.STAT;
 
-  uint8_t iteraciones = 0;
-  while ((IMXRT_LPUART2.STAT & LPUART_STAT_RDRF) && iteraciones < 32)
+  while ((IMXRT_LPUART2.STAT & LPUART_STAT_RDRF))
   {
     uint32_t t = micros();
     uint8_t dato = IMXRT_LPUART2.DATA;
@@ -85,7 +84,6 @@ static void isrGps(void)
     // Si el buffer esta lleno, el byte se descarta. No hay contador de
     // overrun para este buffer -- @todo: anadir uno si en banco se
     // observan perdidas de trama no explicadas por otra causa.
-    iteraciones++;
   }
 }
 
@@ -96,7 +94,7 @@ static void isrGps(void)
 
 #define GPS_TRAMA_MAX_BYTES 3072
 
-DMAMEM static uint8_t s_tramaBuffer[GPS_TRAMA_MAX_BYTES];
+static uint8_t s_tramaBuffer[GPS_TRAMA_MAX_BYTES];
 static uint16_t s_tramaLongitud = 0;
 
 //* ========================= Estado de registro ==============================
@@ -110,6 +108,7 @@ typedef enum
 } EstadoGps;
 
 static EstadoGps s_estadoGps = GPS_VERIFICANDO_FLUJO;
+static bool s_huboRegistroReciente = false;
 
 //* ============================ Utilidades UBX ================================
 
@@ -163,13 +162,14 @@ static void gestionarTramaCompleta(uint8_t msgClass, uint8_t msgId, const uint8_
   if (s_estadoGps == GPS_VERIFICANDO_FLUJO && esRawx)
   {
     s_estadoGps = GPS_REGISTRANDO;
-    Serial.println("[DEBUG]: Esperando trama RAWX valida");
+    // Serial.println("[DEBUG]: Esperando trama RAWX valida");
   }
 
   if (s_estadoGps == GPS_REGISTRANDO)
   {
-    Serial.println("[DEBUG]: Llego por lo menos 1 trama RAWX valida");
+    // Serial.println("[DEBUG]: Llego por lo menos 1 trama RAWX valida");
     GpsLogger_GuardarTramaCruda(trama, longitudTotal);
+    s_huboRegistroReciente = true;
 
     if (esRawx)
     {
@@ -318,8 +318,9 @@ void GpsUART_Init(void)
 /**
  * @copydoc GpsUART_Process
  */
-void GpsUART_Process(void)
+bool GpsUART_Process(void)
 {
+  s_huboRegistroReciente = false;
   while (s_idxLectura != s_idxEscritura)
   {
     uint8_t dato;
@@ -333,6 +334,7 @@ void GpsUART_Process(void)
 
     procesarByteGps(dato, t);
 
-    Serial.println("[DEBUG]: Byte de la UART del GPS procesado correctamente.");
+    // Serial.println("[DEBUG]: Byte de la UART del GPS procesado correctamente.");
   }
+  return s_huboRegistroReciente;
 }

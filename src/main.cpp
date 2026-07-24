@@ -35,12 +35,20 @@
 #define PUERTO_SERIE_BAUD_RATE 115200
 
 /**
+ * @brief LED de actividad del radar.
+ * @details Se alterna (toggle) cada vez que una trama del radar se
+ * registra correctamente en la SD (ver loop()), sirviendo como
+ * indicador visual de que el sistema esta vivo y procesando datos.
+ */
+const int LED_ACTIVIDAD_RADAR_PIN = 13;
+
+/**
  * @brief LED de actividad general del sistema.
  * @details Se alterna (toggle) cada vez que una trama del radar se
  * registra correctamente en la SD (ver loop()), sirviendo como
  * indicador visual de que el sistema esta vivo y procesando datos.
  */
-const int LED_ACTIVIDAD_PIN = 13;
+const int LED_ACTIVIDAD_GPS_PIN = 6;
 
 /**
  * @brief LED dedicado a errores relacionados con la SD del radar.
@@ -53,7 +61,7 @@ const int LED_ERROR_SD_PIN = 2;
  * GpsLogger_Flush() -- ya no existe ningun estado de error de
  * configuracion del GPS en si, porque gps_uart.h ya no configura nada
  * (ver su documentacion, y la nota de este mismo fichero). Pin
- * fisicamente distinto de LED_ACTIVIDAD_PIN y LED_ERROR_SD_PIN, mismo
+ * fisicamente distinto de LED_ACTIVIDAD_RADAR_PIN y LED_ERROR_SD_PIN, mismo
  * patron de cableado (resistencia limitadora + LED hacia GND).
  */
 const int LED_ERROR_GPS_PIN = 4;
@@ -103,11 +111,15 @@ void setup()
   delay(10000);
   Serial.println("[DEBUG]: Inicia el sistema");
 
-  pinMode(LED_ACTIVIDAD_PIN, OUTPUT);
+  pinMode(LED_ACTIVIDAD_RADAR_PIN, OUTPUT);
+  pinMode(LED_ACTIVIDAD_GPS_PIN, OUTPUT);
   pinMode(LED_ERROR_SD_PIN, OUTPUT);
   pinMode(LED_ERROR_GPS_PIN, OUTPUT);
+
   digitalWrite(LED_ERROR_SD_PIN, LOW);
   digitalWrite(LED_ERROR_GPS_PIN, LOW);
+  digitalWrite(LED_ACTIVIDAD_RADAR_PIN, LOW);
+  digitalWrite(LED_ACTIVIDAD_GPS_PIN, LOW);
 
   Serial.begin(PUERTO_SERIE_BAUD_RATE);
 
@@ -116,8 +128,6 @@ void setup()
   while (!RadarLogger_Init())
   {
     digitalWrite(LED_ERROR_SD_PIN, HIGH);
-    delay(400); // Margen entre reintentos.
-    digitalWrite(LED_ERROR_SD_PIN, LOW);
   }
   digitalWrite(LED_ERROR_SD_PIN, LOW);
 
@@ -173,12 +183,15 @@ void loop()
     else
     {
       // Alternancia del LED de actividad
-      digitalWrite(LED_ACTIVIDAD_PIN, !digitalRead(LED_ACTIVIDAD_PIN));
+      digitalWrite(LED_ACTIVIDAD_RADAR_PIN, !digitalRead(LED_ACTIVIDAD_RADAR_PIN));
     }
   }
 
   /* 2. Procesado del GPS: reensamblado de tramas */
-  GpsUART_Process();
+  if (GpsUART_Process())
+  {
+    digitalWrite(LED_ACTIVIDAD_GPS_PIN, !digitalRead(LED_ACTIVIDAD_GPS_PIN));
+  }
 
   /* 3. Temporizador no bloqueante (1 Hz) para guardado seguro */
   uint32_t tiempoActual = millis();
@@ -188,9 +201,18 @@ void loop()
     {
       digitalWrite(LED_ERROR_SD_PIN, HIGH);
     }
+    else
+    {
+      digitalWrite(LED_ERROR_SD_PIN, LOW);
+    }
+
     if (!GpsLogger_Flush())
     {
       digitalWrite(LED_ERROR_GPS_PIN, HIGH);
+    }
+    else
+    {
+      digitalWrite(LED_ERROR_GPS_PIN, LOW);
     }
     s_ultimoFlushMs = tiempoActual;
   }
