@@ -32,3 +32,14 @@ doxygen Doxyfile
 ```
 
 La documentación se genera en `docs/html/index.html`.
+
+## Conexiones con el emulador
+
+Para que todo funcione correctamente con el emulador se deben realizar las
+conexiones de acuerdo a las imágenes inferior donde:
+* El TX del emulador del radar (PIN 8 en la RPi4) se conecta al **PIN 0** de la Teensy 4.1.
+* El RX del emulador del GPS (PIN 7 en la RPi4) se conecta al **PIN 15** de la Teensy 4.1.
+
+| Pinout RPi4 | Pinout Teensy |
+|-------------|---------------|
+| ![Pinout_RPi4](docs/imgs/Pinout_RPi4.png) | ![Pinout_Teensy](docs/imgs/Pinout_Teensy.png) |
