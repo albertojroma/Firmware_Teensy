@@ -1,30 +1,29 @@
 /**
  * @file main.cpp
- * @brief Firmware de adquisicion del radar US-D1 y del GPS-PPK ZED-F9P,
- *        tolerante a latencias de escritura en SD.
+ * @brief Firmware de adquisicion de datos del radar US-D1 y del GPS-PPK
+ *        ZED-F9P.
  *
  * @details
  * Este fichero integra cinco modulos: captura del radar por interrupcion
  * (radar_uart.h), desacoplo temporal mediante buffer circular
  * (radar_buffer.h), registro combinado radar+GPS en CSV sobre SD con
- * flush diferido (radar_logger.h), captura del GPS por interrupcion
- * (gps_uart.h), y registro del paso binario del GPS sobre SD
+ * flush diferido (data_logger.h), captura del GPS por interrupcion
+ * (gps_uart.h), y registro de datos binarios del GPS sobre SD
  * (gps_logger.h). No implementa logica propia mas alla de la
  * orquestacion de estos modulos y de la senalizacion visual mediante
- * tres LEDs (ver mas abajo).
+ * cuatro LEDs (ver mas abajo).
  *
  * @note El receptor GPS debe estar configurado de antemano de forma
  * PERMANENTE (RAWX/SFRBX activos, 115200 baudios, guardado en Flash
- * con u-center) -- este firmware no envia absolutamente nada por
- * Serial3, solo escucha. Ver gps_uart.h para la justificacion completa
- * de esta decision de diseno (un cuelgue deterministico, detectado por
- * biseccion exhaustiva, asociado a la sola presencia de Serial3.write()
- * en el binario).
+ * con u-center)
+ *
+ * @author Alberto Jesus Rodriguez Machado
+ * @date 2026
  */
 #include <Arduino.h>
 #include "radar_uart.h"
 #include "radar_buffer.h"
-#include "radar_logger.h"
+#include "data_logger.h"
 #include "gps_uart.h"
 #include "gps_logger.h"
 
@@ -43,43 +42,61 @@
 const int LED_ACTIVIDAD_RADAR_PIN = 13;
 
 /**
- * @brief LED de actividad general del sistema.
- * @details Se alterna (toggle) cada vez que una trama del radar se
- * registra correctamente en la SD (ver loop()), sirviendo como
- * indicador visual de que el sistema esta vivo y procesando datos.
+ * @brief LED de actividad del GPS.
+ * @details Se alterna cada vez que GpsUART_Process() reensambla al menos una
+ * trama UBX-RXM-RAWX/SFRBX valida en esa iteracion de loop(), sirviendo como
+ * indicador visual de que el receptor GPS esta vivo y entregando datos.
  */
 const int LED_ACTIVIDAD_GPS_PIN = 6;
 
 /**
- * @brief LED dedicado a errores relacionados con la SD del radar.
+ * @brief LED dedicado a errores de escritura del .csv o problemas en la sd.
+ * @details Este LED se enciende si hay problemas en la escritura de datos en el
+ * archivo .csv o si la tarjeta sd no se detecta.
  */
 const int LED_ERROR_SD_PIN = 2;
 
 /**
  * @brief LED dedicado a errores de registro en SD del modulo GPS.
- * @details Unicamente refleja fallos de GpsLogger_Init()/
- * GpsLogger_Flush() -- ya no existe ningun estado de error de
- * configuracion del GPS en si, porque gps_uart.h ya no configura nada
- * (ver su documentacion, y la nota de este mismo fichero). Pin
- * fisicamente distinto de LED_ACTIVIDAD_RADAR_PIN y LED_ERROR_SD_PIN, mismo
- * patron de cableado (resistencia limitadora + LED hacia GND).
+ * @details De enclavamiento (latch): una vez encendido permanece
+ * encendido hasta el reinicio del firmware, reflejando el flag
+ * persistente s_errorSD_gps.
  */
 const int LED_ERROR_GPS_PIN = 4;
 
 /**
  * @brief Marca de tiempo (millis()) del ultimo flush() forzado a la SD.
  * @details Usada por el temporizador no bloqueante de loop() para
- * invocar RadarLogger_Flush()/GpsLogger_Flush() cada 1000 ms sin
+ * invocar DataLogger_Flush()/GpsLogger_Flush() cada 1000 ms sin
  * recurrir a delay().
  */
 static uint32_t s_ultimoFlushMs = 0;
+
+/**
+ * @brief Flag fija (latch) de error de SD del CSV combinado radar+GPS (data_logger.h).
+ * @details Se pone a true ante cualquier fallo de DataLogger_Init(),
+ * DataLogger_Guardar() o DataLogger_Flush(), y nunca vuelve a false:
+ * una vez detectado un fallo, LED_ERROR_SD_PIN permanece encendido
+ * hasta el reinicio del firmware, aunque los flush() posteriores
+ * tengan exito.
+ */
+static bool s_errorSD_datalogger = false;
+
+/**
+ * @brief Flag fija (latch) de error de SD del GPS.
+ * @details Se pone a true ante cualquier fallo de GpsLogger_Init(),
+ * GpsLogger_Flush() o GpsLogger_GuardarTramaCruda(), y nunca vuelve a
+ * false: una vez detectado un fallo, LED_ERROR_GPS_PIN permanece
+ * encendido hasta el reinicio del firmware.
+ */
+static bool s_errorSD_gps = false;
 
 /**
  * @brief Inicializacion del firmware.
  *
  * @details
  * Orden de inicializacion, y por que importa:
- *  1. Se configuran los tres LEDs como salida, con los de error
+ *  1. Se configuran los cuatro LEDs como salida, con los de error
  *     explicitamente apagados.
  *  2. Se abre el puerto USB-Serial, unicamente para depuracion. En el
  *     sistema final desplegado en campo no habra ningun monitor
@@ -94,11 +111,12 @@ static uint32_t s_ultimoFlushMs = 0;
  *     decision ya tomada: sin monitor serie en campo, es preferible
  *     detectar un fallo de SD en tierra que perder silenciosamente una
  *     salida de campo completa.
- *  5. Se consulta el numero de sesion ya elegido por RadarLogger_Init()
+ *  5. Se consulta el numero de sesion ya elegido por DataLogger_Init()
  *     y se usa para inicializar el registro del `.ubx` del GPS, de
  *     forma que ambos ficheros comparten el mismo numero de vuelo. Si
- *     GpsLogger_Init() falla, se enciende LED_ERROR_GPS_PIN pero NO se
- *     bloquea el firmware -- el radar debe poder seguir registrando
+ *     GpsLogger_Init() falla, se enclava s_errorSD_gps y se enciende
+ *     LED_ERROR_GPS_PIN (permanece encendido hasta el reinicio) pero NO
+ *     se bloquea el firmware -- el radar debe poder seguir registrando
  *     sin GPS.
  *  6. Se inicializan las interrupciones del radar y del GPS.
  *     GpsUART_Init() no envia nada por Serial3 -- el receptor debe
@@ -108,7 +126,8 @@ static uint32_t s_ultimoFlushMs = 0;
 void setup()
 {
   // Para que de tiempo a arrancar el monitor serie
-  delay(10000);
+  // delay(10000);
+
   Serial.println("[DEBUG]: Inicia el sistema");
 
   pinMode(LED_ACTIVIDAD_RADAR_PIN, OUTPUT);
@@ -125,16 +144,17 @@ void setup()
 
   RadarBuffer_Init();
 
-  while (!RadarLogger_Init())
+  while (!DataLogger_Init())
   {
     digitalWrite(LED_ERROR_SD_PIN, HIGH);
   }
   digitalWrite(LED_ERROR_SD_PIN, LOW);
 
-  int numeroVuelo = RadarLogger_ObtenerNumeroVuelo();
+  int numeroVuelo = DataLogger_ObtenerNumeroVuelo();
   if (!GpsLogger_Init(numeroVuelo))
   {
     // Fallo NO bloqueante: el radar debe poder seguir registrando sin GPS.
+    s_errorSD_gps = true;
     digitalWrite(LED_ERROR_GPS_PIN, HIGH);
   }
 
@@ -152,20 +172,20 @@ void setup()
  *
  *  1. **Consumo del buffer circular del radar**: extrae con
  *     `RadarBuffer_Pop()` todas las tramas acumuladas, y las registra
- *     con `RadarLogger_Guardar()`.
+ *     con `DataLogger_Guardar()`.
  *
  *  2. **Procesado del GPS**: `GpsUART_Process()` reensambla las tramas
  *     UBX recibidas y las registra en SD una vez detectado flujo valido
  *     -- toda esa logica vive dentro del propio modulo (ver
- *     gps_uart.cpp). Sin ninguna comprobacion de error asociada: ya no
- *     existe ese concepto, al no haber ninguna configuracion que pueda
- *     fallar (ver gps_uart.h).
+ *     gps_uart.cpp). Puede fallar la escritura de la trama en SD:
+ *     `GpsUART_Process()` reporta ese fallo mediante su parametro de salida, y
+ *     se enclava en s_errorSD_gps.
  *
  *  3. **Flush**: cada 1000 ms (comparacion de millis() sin usar
- *     delay()), se invoca `RadarLogger_Flush()` y `GpsLogger_Flush()`
+ *     delay()), se invoca `DataLogger_Flush()` y `GpsLogger_Flush()`
  *     para forzar la escritura fisica del contenido acumulado en la SD.
  *
- * @see RadarLogger_Guardar(), GpsUART_Process()
+ * @see DataLogger_Guardar(), GpsUART_Process()
  */
 void loop()
 {
@@ -174,10 +194,11 @@ void loop()
   /* 1. Consumimos todas las tramas que el radar haya metido en el buffer */
   while (RadarBuffer_Pop(trama_actual))
   {
-    bool ok = RadarLogger_Guardar(trama_actual);
+    bool ok = DataLogger_Guardar(trama_actual);
 
     if (!ok)
     {
+      s_errorSD_datalogger = true;
       digitalWrite(LED_ERROR_SD_PIN, HIGH);
     }
     else
@@ -188,31 +209,31 @@ void loop()
   }
 
   /* 2. Procesado del GPS: reensamblado de tramas */
-  if (GpsUART_Process())
+  bool huboErrorSDGps = false;
+  if (GpsUART_Process(huboErrorSDGps))
   {
     digitalWrite(LED_ACTIVIDAD_GPS_PIN, !digitalRead(LED_ACTIVIDAD_GPS_PIN));
+  }
+  if (huboErrorSDGps)
+  {
+    s_errorSD_gps = true;
+    digitalWrite(LED_ERROR_GPS_PIN, HIGH);
   }
 
   /* 3. Temporizador no bloqueante (1 Hz) para guardado seguro */
   uint32_t tiempoActual = millis();
   if (tiempoActual - s_ultimoFlushMs >= 1000)
   {
-    if (!RadarLogger_Flush())
+    if (!DataLogger_Flush())
     {
+      s_errorSD_datalogger = true;
       digitalWrite(LED_ERROR_SD_PIN, HIGH);
-    }
-    else
-    {
-      digitalWrite(LED_ERROR_SD_PIN, LOW);
     }
 
     if (!GpsLogger_Flush())
     {
+      s_errorSD_gps = true;
       digitalWrite(LED_ERROR_GPS_PIN, HIGH);
-    }
-    else
-    {
-      digitalWrite(LED_ERROR_GPS_PIN, LOW);
     }
     s_ultimoFlushMs = tiempoActual;
   }

@@ -8,10 +8,8 @@
  * "RadarFrame" para su uso por el resto del firmware (buffer circular, SD).
  * La captura ocurre mediante interrupcion hardware sobre el periferico
  * LPUART6, al que corresponde el puerto logico Serial1 de
- * Teensyduino (ver tabla de direcciones base de registro por puerto Serial de Teensy 4.1 https://github.com/MicroControleurMonde/Teensy_4.1/blob/main/Teensy_LPUART.py).
- *
- * @note serialEvent1() NO es una interrupcion real: se ejecuta al
- * final de cada iteracion de loop().
+ * Teensyduino (ver tabla de direcciones base de registro por puerto Serial de
+ * Teensy 4.1 https://github.com/MicroControleurMonde/Teensy_4.1/blob/main/Teensy_LPUART.py).
  *
  * @author Alberto Jesus Rodriguez Machado
  * @date 2026
@@ -33,9 +31,9 @@
  *
  * @details
  * `valida` refleja el resultado del checksum, pero la trama se conserva y se
- * registra igualmente aunque sea valida
- * `trama_cruda` guarda los 6 bytes exactos recibidos, sin interpretar, como
- * respaldo de auditoria independiente de como el parser los haya decodificado.
+ * registra igualmente aunque no sea valida `trama_cruda` guarda los 6 bytes
+ * exactos recibidos, sin interpretar, como respaldo de auditoria independiente
+ * de como el parser los haya decodificado.
  */
 typedef struct
 {
@@ -58,7 +56,7 @@ typedef struct
  * @warning Llamar una unica vez, desde setup(), antes de loop().
  * @note Tras esta llamada, Serial1.available()/read() dejan de
  * reflejar los bytes recibidos (toda la recepcion pasa a `isrRadar()`).
- * Serial1.write() no se ve afectado.
+ *
  * @see isrRadar() (radar_uart.cpp)
  */
 void RadarUART_Init();

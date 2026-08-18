@@ -6,17 +6,7 @@
  * @details
  * Gestiona un unico fichero por sesion: "gps_logger_N.ubx", copia
  * binaria integra de cada trama UBX completa y valida, sin descomponer
- * ni renombrar por trama -- mismo patron que el proyecto de referencia
- * F9P_RAWX_Logger, que RTKLIB (RTKCONV) espera directamente como
- * fichero continuo.
- *
- * @note El par de sincronizacion (timestamp del MCU, tiempo GPS) que
- * antes gestionaba este modulo en un segundo fichero
- * ("correlacion_temporal_N.csv") se ha trasladado a
- * RadarLogger_GuardarSyncGps() (radar_logger.h), como filas de tipo
- * "GPS" dentro del mismo CSV que ya usa el radar -- ver la justificacion
- * completa (reduccion de 3 a 2 ficheros simultaneos en la SD) en
- * radar_logger.h.
+ * ni renombrar por trama
  *
  * @author Alberto Jesus Rodriguez Machado
  * @date 2026
@@ -29,21 +19,25 @@
 /**
  * @brief Abre el fichero de paso continuo binario de la sesion de GPS.
  * @param numeroVuelo Numero de sesion, para que "gps_logger_N.ubx"
- * comparta el mismo N que "radar_logger_N.csv" -- ver
- * RadarLogger_ObtenerNumeroVuelo().
+ * comparta el mismo N que "data_logger_N.csv" -- ver
+ * DataLogger_ObtenerNumeroVuelo().
  * @return true si el fichero quedo listo; false si falla.
- * @note NO llama a SD.begin(): se asume que RadarLogger_Init() ya
+ * @note NO llama a SD.begin(): se asume que DataLogger_Init() ya
  * inicializo la tarjeta antes de que este modulo se use.
  */
 bool GpsLogger_Init(int numeroVuelo);
 
 /**
- * @brief Anade los bytes crudos de una trama UBX completa al fichero
+ * @brief Anyade los bytes crudos de una trama UBX completa al fichero
  * de paso continuo, sin forzar su escritura fisica.
  * @param datos Puntero al inicio de la trama (byte de sync).
  * @param longitud Tamano total de la trama, en bytes.
  * @return true si se escribio en el bufer; false si el fichero no esta
  * disponible o no se escribieron todos los bytes.
+ * @details Escribe los bytes tal cual, sin ningun procesado.
+ *
+ * @note Los bytes son ya una trama UBX completa y con checksum valido
+ * (verificado antes de llamar a esta funcion, en gps_uart.cpp).
  * @see GpsLogger_Flush()
  */
 bool GpsLogger_GuardarTramaCruda(const uint8_t *datos, uint16_t longitud);

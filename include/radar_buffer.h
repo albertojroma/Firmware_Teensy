@@ -8,9 +8,10 @@
  * puede arriesgar la perdida de bytes o interferir con otras interrupciones
  * del sistema (p. ej. la del GPS). Escribir en la tarjeta SD, es una operacion
  * lenta y de duracion variable.
- * La interrupcion solo tiene que copiar 8 bytes (RadarBuffer_Push()) y seguir;
- * el consumo mas lento (registro en SD desde loop(), ver main.cpp) se hace
- * fuera de cualquier contexto de interrupcion, sin presion de tiempo real.
+ * La interrupcion solo tiene que copiar una trama RadarFrame
+ * (RadarBuffer_Push()) y seguir; el consumo mas lento (registro en SD
+ * desde loop(), ver main.cpp) se hace fuera de cualquier contexto de
+ * interrupcion, sin presion de tiempo real.
  *
  * @author Alberto Jesus Rodriguez Machado
  * @date 2026
@@ -36,11 +37,9 @@
  * Como este calculo se ejecuta en cada byte recibido dentro de una
  * interrupcion hardware (a traves de RadarBuffer_Push()), minimizar el coste
  * por ciclo importa.
- * @todo justificar por que el tamano concreto es 256 y no otro valor
- * potencia de 2 (p. ej. 128 o 512) -- no se ha documentado un calculo
- * explicito de cuantos segundos de margen a la tasa de 100 Hz del
- * radar representa este tamano frente a la duracion esperada de una
- * escritura en SD.
+ * El valor concreto (256, frente a otras potencias de 2 como 128 o 512)
+ * es una eleccion conservadora: da margen de sobra para desacoplar la
+ * ISR del consumo en loop() sin un coste relevante de memoria RAM.
  */
 #define BUFFER_SIZE 256
 
@@ -69,9 +68,10 @@ void RadarBuffer_Init(void);
  *
  * @details Pensada para invocarse desde la interrupcion de recepcion
  * del radar (isrRadar(), en radar_uart.cpp).
- *
- * @param frame Trama a insertar, pasada por referencia constante para
- *        evitar la copia de 8 bytes que supondria pasarla por valor.
+ * @param frame Trama a insertar, pasada por referencia para evitar la
+ *        copia de la trama completa que supondria pasarla por valor.
+ *        Es constante porque la funcion solo necesita leerla para
+ *        copiarla al buffer, no modificar el original de la ISR.
  * @return true si se inserto correctamente; false si el buffer estaba
  *         lleno, en cuyo caso la trama se descarta (perdida de trama
  *         por falta de consumo a tiempo desde loop()).

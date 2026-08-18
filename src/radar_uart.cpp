@@ -48,7 +48,7 @@ static uint8_t s_snr = 0;  /**< Byte de SNR de la trama en curso. */
  *
  * @details
  * 1. Reconoce (limpia) flags de error de STAT antes de leer datos:
- *    `IMXRT_LPUART6.STAT = IMXRT_LPUART6.STAT`. Las banderas OR
+ *    `IMXRT_LPUART6.STAT = IMXRT_LPUART6.STAT`. Las flags OR
  *    (overrun), NF (ruido), FE (trama), PF (paridad) e IDLE siguen el
  *    convenio "escribir 1 para borrar"; si alguna queda activa sin
  *    reconocer, la interrupcion se dispara sin parar y bloquea todo
@@ -56,12 +56,15 @@ static uint8_t s_snr = 0;  /**< Byte de SNR de la trama en curso. */
  *    de este modulo, y documentado con el mismo sintoma (banderas
  *    OR/FE sin reconocer -> interrupcion indefinida) en:
  *    https://github.com/phoenix-rtos/phoenix-rtos-devices/issues/55
- * 2. RDRF (Receive Data Register Full) activo implica la captura de
- *    `micros()` y lee `DATA` (la lectura desactiva RDRF).
+ * 2. RDRF (bit 21 de STAT, apartado 49.6.1.7.3, p. 2922 del manual) se
+ *    activa cuando hay datos pendientes de leer en el buffer de
+ *    recepcion; activo, el codigo captura `micros()` y lee `DATA`.
+ *    Con el FIFO deshabilitado, ese buffer es un unico dato y leerlo
+ *    desactiva RDRF directamente.
  * 3. Avanza en la maquina de estados. Notar que el parseo/analisis de validez
  *    de la trama se realiza dentro del handler. Como es una operacion sencilla
- *    en relacion al envio de tramas del radar (100 Hz) y la capacidad del
- *    micro usado no hay problema.
+ *    en relacion al envio de tramas del radar (100 Hz) y el tamanyo de la
+ *    trama no es variable no hay problema.
 
  */
 static void isrRadar(void)
@@ -129,17 +132,19 @@ static void isrRadar(void)
 }
 
 /**
- * @note RDRF y `LPUART_CTRL_RIE` (usado en RadarUART_Init()) son nombres de
- * campo definidos en `imxrt.h` (cabecera del propio framework Teensyduino); no
- * se ha localizado un enlace externo con numero de pagina exacto del manual de
- * referencia de NXP que los defina, mas alla de esa cabecera.
+ * @note RDRF y RIE son nombres de campos de registros de LPUART ("STAT" y
+ * "CTRL" respectivamente).
  */
 void RadarUART_Init()
 {
   Serial1.begin(RADAR_BAUD_RATE);
 
+  // define como "handler" de la interrupcion IRQ_LPUART6 a la
+  // funcion isrRadar()
   attachInterruptVector(IRQ_LPUART6, isrRadar);
+  // habilita esa interrupcion a nivel del NVIC del nucleo
   NVIC_ENABLE_IRQ(IRQ_LPUART6);
+  // se habilita la interrupcion
   IMXRT_LPUART6.CTRL |= LPUART_CTRL_RIE; // Receiver Interrupt Enable
 
   s_estado = WAIT_HEADER;

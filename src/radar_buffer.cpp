@@ -74,10 +74,10 @@ bool RadarBuffer_Push(const RadarFrame &frame)
  * Deshabilitar las interrupciones durante la copia impide que isrRadar()
  * pueda ejecutarse mientras esta copia esta en curso, garantizando
  * que frame siempre contenga una trama completa y consistente.
- * El coste de este bloqueo es minimo: son solo unas pocas instrucciones
- * (la copia de 8 bytes), y el radar transmite a 100 Hz (muy por debajo de
- * cualquier frecuencia a la que este breve bloqueo pudiera suponer un problema
- * de temporizacion para otras interrupciones del sistema).
+ * El coste de este bloqueo es breve (la copia de una RadarFrame, que
+ * ocupa >=14 bytes, no 8) y el radar transmite a 100 Hz -- muy por
+ * debajo de cualquier frecuencia a la que este bloqueo pudiera suponer
+ * un problema de temporizacion.
  *
  */
 bool RadarBuffer_Pop(RadarFrame &frame)
@@ -88,7 +88,7 @@ bool RadarBuffer_Pop(RadarFrame &frame)
         return false;
     }
 
-    // SECCION CRITICA: Protegemos la lectura de 8 bytes de interrupciones
+    // SECCION CRITICA: Protegemos la lectura de una RadarFrame (>=14 bytes) de interrupciones
     noInterrupts();
     frame = s_buffer.data[s_buffer.tail];
     s_buffer.tail = (s_buffer.tail + 1) & BUFFER_MASK;

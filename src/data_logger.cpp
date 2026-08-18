@@ -1,22 +1,29 @@
 /**
- * @file radar_logger.cpp
+ * @file data_logger.cpp
  * @brief Implementacion del registro combinado (radar + sincronizacion
  *        GPS) en CSV sobre SD.
- * @see radar_logger.h para el proposito general del modulo y por que se
+ * @see data_logger.h para el proposito general del modulo y por que se
  *      combinaron ambos flujos en un unico fichero.
  */
-#include "radar_logger.h"
+#include "data_logger.h"
 #include <SD.h>
 
 /** @brief Fichero CSV abierto durante toda la sesion de registro (radar + GPS). */
 static File s_archivo;
 
 /**
- * @brief Numero de sesion ("vuelo") elegido por RadarLogger_Init().
- * @details -1 mientras no se haya llamado a RadarLogger_Init() con
- * exito -- ver RadarLogger_ObtenerNumeroVuelo().
+ * @brief Numero de sesion ("vuelo") elegido por DataLogger_Init().
+ * @details -1 mientras no se haya llamado a DataLogger_Init() con
+ * exito -- ver DataLogger_ObtenerNumeroVuelo().
  */
 static int s_numeroVueloActual = -1;
+
+/**
+ * @def DATA_LOGGER_NUMERO_VUELO_MAX
+ * @brief Limite maximo de sesiones que DataLogger_Init() esta dispuesto
+ * a probar al buscar un nombre de fichero libre.
+ */
+#define DATA_LOGGER_NUMERO_VUELO_MAX 999
 
 /**
  * @brief Escribe un byte en hexadecimal de 2 digitos (con cero a la izquierda si hace falta).
@@ -24,6 +31,9 @@ static int s_numeroVueloActual = -1;
  */
 static void imprimirHexByte(uint8_t valor)
 {
+  // print(valor, HEX) no rellena con ceros a la izquierda: 0x05 se
+  // imprimiria como "5". Se antepone "0" manualmente para mantener
+  // siempre el ancho fijo de 2 caracteres por byte.
   if (valor < 0x10)
     s_archivo.print("0");
   s_archivo.print(valor, HEX);
@@ -33,7 +43,7 @@ static void imprimirHexByte(uint8_t valor)
  * @details `SD.begin(BUILTIN_SDCARD)` usa la ranura microSD integrada
  * en la propia Teensy 4.1 (no un lector SPI externo).
  */
-bool RadarLogger_Init(void)
+bool DataLogger_Init(void)
 {
   if (!SD.begin(BUILTIN_SDCARD))
   {
@@ -41,16 +51,30 @@ bool RadarLogger_Init(void)
     return false;
   }
 
-  char nombreArchivo[24];
-  uint8_t numeroVuelo = 1;
+  // "data_logger_999.csv" (999 = DATA_LOGGER_NUMERO_VUELO_MAX) son 20
+  // caracteres + \0 = 21 bytes. 32 tiene margen de sobra, es multiplo
+  // de 2 y no es excesivamente grande.
+  char nombreArchivo[32];
+  uint16_t numeroVuelo = 1;
   do
   {
-    snprintf(nombreArchivo, sizeof(nombreArchivo), "radar_logger_%d.csv", numeroVuelo);
+    if (numeroVuelo > DATA_LOGGER_NUMERO_VUELO_MAX)
+    {
+      Serial.println("[ERROR]: Limite de sesiones alcanzado, no se encontro nombre de fichero libre");
+      return false;
+    }
+    // snprintf formatea igual que sprintf (sustituye %d por numeroVuelo)
+    // pero recibe el tamano del buffer y nunca escribe mas alla de el,
+    // truncando si hiciera falta -> evita el desbordamiento de sprintf.
+    snprintf(nombreArchivo, sizeof(nombreArchivo), "data_logger_%d.csv", numeroVuelo);
     numeroVuelo++;
   } while (SD.exists(nombreArchivo));
   // Al salir del bucle, nombreArchivo es garantizado nuevo -> siempre
   // hay que escribir la cabecera.
 
+  // SD.open() abre el fichero y devuelve un objeto File. Con FILE_WRITE
+  // lo crea si no existe y posiciona el cursor al final (append). Si
+  // falla, el File devuelto se evalua como falso (operator bool()).
   s_archivo = SD.open(nombreArchivo, FILE_WRITE);
   if (!s_archivo)
   {
@@ -65,7 +89,7 @@ bool RadarLogger_Init(void)
   s_archivo.println("tipo,timestamp_us,altitud_cm,snr,checksum_recibido,checksum_valido,trama_cruda,rcvTow,week");
   s_archivo.flush();
 
-  Serial.println("[DEBUG]: Logger del radar inicializado.");
+  Serial.println("[DEBUG]: Logger de datos inicializado.");
   return true;
 }
 
@@ -84,15 +108,15 @@ bool RadarLogger_Init(void)
  * fisica sincrona de varios milisegundos; a 100 Hz (una trama cada 10 ms),
  * hacerlo aqui arriesgaria que loop() no vaciara el buffer circular al ritmo
  * al que la ISR lo llena. Se escribe solo en el bufer RAM de la libreria SD;
- * la escritura fisica se difiere a RadarLogger_Flush(), invocada cada 1000 ms
+ * la escritura fisica se difiere a DataLogger_Flush(), invocada cada 1000 ms
  * desde main.cpp.
  *
  * @warning Trade-off: hasta ~1 s de datos (~100 tramas) quedan solo en
  * RAM hasta el siguiente flush. Un corte de alimentacion en ese intervalo los
  * perderia. Si esto no fuese viable, se puede reducir la cadencia de
- * `RadarLogger_Flush()` en main.cpp (p. ej. a 100-200 ms).
+ * `DataLogger_Flush()` en main.cpp (p. ej. a 100-200 ms).
  */
-bool RadarLogger_Guardar(const RadarFrame &frame)
+bool DataLogger_Guardar(const RadarFrame &frame)
 {
   if (!s_archivo)
     return false;
@@ -112,11 +136,11 @@ bool RadarLogger_Guardar(const RadarFrame &frame)
   {
     imprimirHexByte(frame.trama_cruda[i]);
     if (i < 5)
+      // se deja un espacio entre byte y byte de la trama cruda
       s_archivo.print(" ");
   }
   s_archivo.println(",,"); // columnas rcvTow,week vacias (no aplican a una fila RADAR)
 
-  // AVISO: aqui NO hay flush()! Solo guardamos en cache (ver @details).
   return true;
 }
 
@@ -125,11 +149,11 @@ bool RadarLogger_Guardar(const RadarFrame &frame)
  * Antepone "GPS," como columna `tipo`, deja vacias las 5 columnas
  * propias del radar (altitud_cm, snr, checksum_recibido, checksum_valido,
  * trama_cruda), y anade rcvTow/week al final.
- * Mismo criterio de flush diferido que RadarLogger_Guardar() -- ver
+ * Mismo criterio de flush diferido que DataLogger_Guardar() -- ver
  * @details de esa funcion para el razonamiento completo, que aplica
  * igual aqui al compartir el mismo fichero.
  */
-bool RadarLogger_GuardarSyncGps(const GpsSyncPoint &punto)
+bool DataLogger_GuardarSyncGps(const GpsSyncPoint &punto)
 {
   if (!s_archivo)
     return false;
@@ -144,11 +168,14 @@ bool RadarLogger_GuardarSyncGps(const GpsSyncPoint &punto)
   return true;
 }
 
-bool RadarLogger_Flush(void)
+bool DataLogger_Flush(void)
 {
   if (!s_archivo)
     return false;
 
+  // flush() fuerza la escritura a la SD de lo que queda en el buffer
+  // de la libreria, sin esperar a que se llene o a que se cierre el
+  // fichero. Limita la perdida de datos ante un corte.
   s_archivo.flush();
 
   if (s_archivo.getWriteError())
@@ -159,10 +186,8 @@ bool RadarLogger_Flush(void)
   return true;
 }
 
-/**
- * @copydoc RadarLogger_ObtenerNumeroVuelo
- */
-int RadarLogger_ObtenerNumeroVuelo(void)
+/* Implementacion de DataLogger_ObtenerNumeroVuelo(). Documentacion en data_logger.h */
+int DataLogger_ObtenerNumeroVuelo(void)
 {
   return s_numeroVueloActual;
 }

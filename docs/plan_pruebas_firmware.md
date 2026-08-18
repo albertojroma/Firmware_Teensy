@@ -10,9 +10,9 @@ la versión previa del firmware:
   (`GPS_ERROR` ha desaparecido). `LED_ERROR_GPS_PIN` ahora refleja
   **únicamente** fallos de escritura en la SD del propio GPS.
 - Ya no hay fichero `correlacion_temporal_N.csv` aparte: las filas de
-  sincronización del GPS viven dentro de `radar_logger_N.csv`, con una
+  sincronización del GPS viven dentro de `data_logger_N.csv`, con una
   columna `tipo` (`RADAR`/`GPS`).
-- Solo quedan **dos** ficheros por sesión: `radar_logger_N.csv`
+- Solo quedan **dos** ficheros por sesión: `data_logger_N.csv`
   (combinado) y `gps_logger_N.ubx`.
 
 ## Tabla resumen
@@ -74,7 +74,7 @@ una configuración por firmware, con las implicaciones ya conocidas).
 
 ### Prueba 1.1 — Comportamiento ante SD ausente
 
-**Objetivo**: confirmar que `RadarLogger_Init()` reintenta correctamente
+**Objetivo**: confirmar que `DataLogger_Init()` reintenta correctamente
 y que `LED_ERROR_SD_PIN` (pin 2) queda encendido mientras no haya SD.
 
 **Precondiciones**: Teensy alimentada por USB, sin tarjeta SD insertada,
@@ -103,7 +103,7 @@ atención, ha cambiado con el rediseño:
   depende en absoluto de que haya un GPS físico conectado, solo de que
   la SD funcione; sin ningún fallo de SD, este LED no tiene ningún
   motivo para encenderse, con o sin GPS conectado.
-- En la SD existen `radar_logger_1.csv` (con la cabecera de 9 columnas,
+- En la SD existen `data_logger_1.csv` (con la cabecera de 9 columnas,
   incluida la columna `tipo`) y `gps_logger_1.ubx` (vacío, 0 bytes).
 
 **Si falla**: si `LED_ERROR_GPS_PIN` se enciende sin que haya ningún
@@ -130,7 +130,7 @@ Teensy reiniciada con el emulador ya corriendo.
 
 **Pasos**: dejar correr 5-10 segundos, extraer la SD.
 
-**Criterio de éxito**: `radar_logger_N.csv` contiene filas de tipo
+**Criterio de éxito**: `data_logger_N.csv` contiene filas de tipo
 `GPS` desde prácticamente el primer segundo (el emulador ya emite
 `RAWX`/`SFRBX` desde el arranque, sin ningún estado de fábrica que
 esperar). `gps_logger_N.ubx` no está vacío.
@@ -164,13 +164,13 @@ errores de checksum. `RTKCONV` genera un `.obs` sin errores de parseo.
 **Objetivo**: confirmar que `timestamp_us` y `rcvTow` crecen de forma
 estrictamente monótona en las filas de tipo `GPS`.
 
-**Pasos**: abrir `radar_logger_N.csv`, filtrar por `tipo == "GPS"`,
+**Pasos**: abrir `data_logger_N.csv`, filtrar por `tipo == "GPS"`,
 comprobar la monotonía de ambas columnas.
 
 **Criterio de éxito**: monotonía estricta. Incremento de `rcvTow` entre
-filas consecutivas ≈ 1 s (coincidiendo con la tasa de 1 Hz del
-emulador — @todo: verificar contra la tasa real si se ha cambiado del
-valor por defecto).
+filas consecutivas ≈ 1 s, la tasa adoptada como criterio de diseño para
+validar primero el funcionamiento del sistema; la mejora de la tasa de
+refresco queda como trabajo futuro.
 
 ### Prueba 3.3 — Rampa de satélites
 
@@ -190,7 +190,7 @@ largo de los primeros ~30 segundos.
 ### Prueba 4.1 — Referencia de comportamiento "solo radar"
 
 **Objetivo**: obtener una línea base de las filas `RADAR` en
-`radar_logger_N.csv` sin GPS conectado.
+`data_logger_N.csv` sin GPS conectado.
 
 **Precondiciones**: solo el radar conectado, sin GPS ni emulador.
 
@@ -198,8 +198,7 @@ largo de los primeros ~30 segundos.
 `RADAR` y contrastar contra la duración cronometrada.
 
 **Criterio de éxito**: número de filas `RADAR` ≈ 100 × segundos
-transcurridos, con tolerancia razonable (@todo: definir margen exacto
-tras la primera medida empírica).
+transcurridos, con tolerancia razonable.
 
 ---
 
@@ -219,7 +218,7 @@ que en la prueba 4.1.
 
 ### Prueba 5.2 — Coherencia de la numeración compartida
 
-**Objetivo**: confirmar que `radar_logger_N.csv` y `gps_logger_N.ubx`
+**Objetivo**: confirmar que `data_logger_N.csv` y `gps_logger_N.ubx`
 comparten el mismo `N`.
 
 **Criterio de éxito**: mismo número `N` en ambos ficheros de la misma
@@ -250,7 +249,7 @@ cielo.
 **Pasos**: alimentar el conjunto, esperar al TTFF real (hasta ~30 s en
 frío), extraer la SD tras unos minutos.
 
-**Criterio de éxito**: aparecen filas `GPS` en `radar_logger_N.csv` y
+**Criterio de éxito**: aparecen filas `GPS` en `data_logger_N.csv` y
 contenido real en `gps_logger_N.ubx`, con datos de satélites reales
 (no sintéticos como en el emulador).
 
@@ -266,16 +265,14 @@ este punto.
 
 ### Prueba 7.1 — Regresión lineal timestamp_MCU ↔ rcvTow
 
-**Objetivo**: confirmar que las filas `GPS` de `radar_logger_N.csv`
+**Objetivo**: confirmar que las filas `GPS` de `data_logger_N.csv`
 son aptas para el ajuste por mínimos cuadrados del post-proceso real.
 
-**Pasos**: cargar `radar_logger_N.csv`, filtrar por `tipo == "GPS"`,
+**Pasos**: cargar `data_logger_N.csv`, filtrar por `tipo == "GPS"`,
 ejecutar `numpy.polyfit(timestamp_us, rcvTow, 1)`.
 
 **Criterio de éxito**: ajuste sin excepciones, pendiente cercana a
-1×10⁻⁶ (µs → s). @todo: margen de tolerancia sin definir, pendiente de
-primera medida empírica con GPS real (el emulador no modela deriva de
-reloj).
+1×10⁻⁶ (µs → s).
 
 ---
 
